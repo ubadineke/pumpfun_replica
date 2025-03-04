@@ -10,9 +10,11 @@ import {
   MintLayout,
   setAuthority,
 } from "@solana/spl-token";
+import { getAccount } from "@solana/spl-token";
 import { findMetadataPda } from "@metaplex-foundation/mpl-token-metadata";
 
 import { glob } from "fs";
+import { UseInterceptors } from "@nestjs/common";
 
 describe("pumpfun-replica", () => {
   // Configure the client to use the local cluster.
@@ -38,12 +40,17 @@ describe("pumpfun-replica", () => {
   let bondingCurveSolEscrowPDA;
   let metadataPDA;
   let bondingCurveTokenAccount;
-  let FEE_RECEIVER = new PublicKey("Bf8PxxWt7UTvNGcrDyNwQiERSwNroa4pEo1pxwKo17Uh");
+  let userTokenAccount;
+  // let FEE_RECEIVER = new PublicKey("Bf8PxxWt7UTvNGcrDyNwQiERSwNroa4pEo1pxwKo17Uh");
+  let FEE_RECEIVER = anchor.web3.Keypair.generate();
   let admin = anchor.web3.Keypair.generate();
   let creator1 = anchor.web3.Keypair.generate();
+  let user1 = anchor.web3.Keypair.generate();
+
   console.log("Admin Publickey", admin.publicKey.toString());
   console.log("Creator Publickey", creator1.publicKey.toString());
   let tokenMint1: PublicKey;
+  let SOL_FOR_BUY = new anchor.BN(0.2 * 1_000_000_000);
 
   before(async () => {
     //Airdrop SOL
@@ -89,6 +96,7 @@ describe("pumpfun-replica", () => {
     //AIRDROP ACCOUNTS
     await airdropSOL(admin.publicKey, 1);
     await airdropSOL(creator1.publicKey, 1);
+    await airdropSOL(user1.publicKey, 1);
 
     //CREATE TOKEN MINT 1
     tokenMint1 = await createMint(provider.connection, creator1, creator1.publicKey, null, 6);
@@ -110,8 +118,20 @@ describe("pumpfun-replica", () => {
       bondingCurvePDA,
       true
     );
-    console.log("Bonding Curve Token Account", bondingCurveTokenAccount);
+    // console.log("Bonding Curve Token Account", bondingCurveTokenAccount);
 
+    //DERIVE USER TOKEN ACCOUNT
+    userTokenAccount = await getOrCreateAssociatedTokenAccount(
+      provider.connection,
+      user1,
+      tokenMint1,
+      user1.publicKey,
+      true
+    );
+    // console.log("User Token Account", userTokenAccount);
+
+    const initialTokenAccountInfo = await getAccount(provider.connection, userTokenAccount.address);
+    console.log("INITIAL USER TOKEN ACCOUNT INFO", initialTokenAccountInfo.amount.toString());
     //DERIVE METADATA PDA
     // metadataPDA = derivePDA(["metadata", TOKEN_METADATA_PROGRAM_ID, tokenMint1]);
     [metadataPDA] = PublicKey.findProgramAddressSync(
@@ -146,7 +166,7 @@ describe("pumpfun-replica", () => {
       mintDecimals: 6,
       migrateFeeAmount: new anchor.BN(500),
       migrationTokenAllocation: new anchor.BN(50000000000000),
-      feeReceiver: FEE_RECEIVER,
+      feeReceiver: FEE_RECEIVER.publicKey,
       lpConfig: PublicKey.default,
     };
 
@@ -162,7 +182,7 @@ describe("pumpfun-replica", () => {
 
     const state = await program.account.global.fetch(globalPDA);
     assert.strictEqual(state.tokenTotalSupply.toNumber(), 1000000000000000);
-    assert.strictEqual(state.feeReceiver.toString(), FEE_RECEIVER.toString());
+    assert.strictEqual(state.feeReceiver.toString(), FEE_RECEIVER.publicKey.toString());
     assert.strictEqual(state.initialized, true);
     console.log("Your transaction signature", tx);
   });
@@ -197,5 +217,44 @@ describe("pumpfun-replica", () => {
     assert.strictEqual(bonding_curve.realSolReserves.toNumber(), 0);
     assert.strictEqual(bonding_curve.complete, false);
     assert.strictEqual(bonding_curve.virtualTokenReserves.toNumber(), 1073000000000000);
+  });
+
+  it("Token bought from bonding curve", async () => {
+    const initialTokenAccountInfo = await getAccount(provider.connection, userTokenAccount.address);
+    console.log("INITIAL USER TOKEN ACCOUNT INFO", initialTokenAccountInfo.amount.toString());
+
+    const tx = await program.methods
+      .buy(SOL_FOR_BUY)
+      .accounts({
+        user: user1.publicKey,
+        global: globalPDA,
+        feeReceiver: FEE_RECEIVER.publicKey,
+        mint: tokenMint1,
+        bondingCurve: bondingCurvePDA,
+        bondingCurveTokenAccount: bondingCurveTokenAccount.address,
+        bondingCurveSolEscrow: bondingCurveSolEscrowPDA,
+        userTokenAccount: userTokenAccount.address,
+        systemProgram: SystemProgram.programId,
+        tokenProgram: anchor.utils.token.TOKEN_PROGRAM_ID,
+        associatedTokenProgram: anchor.utils.token.ASSOCIATED_PROGRAM_ID,
+        tokenMetadataProgram: TOKEN_METADATA_PROGRAM_ID,
+        rent: anchor.web3.SYSVAR_RENT_PUBKEY,
+      })
+      .signers([user1])
+      .rpc();
+
+    const userTokenAccountInfo = await getAccount(provider.connection, userTokenAccount.address);
+    const bonding_curve = await program.account.bondingCurve.fetch(bondingCurvePDA);
+    const globalState = await program.account.global.fetch(globalPDA);
+    const feeReceiverBalance = await provider.connection.getBalance(FEE_RECEIVER.publicKey);
+
+    //EQUIVALENT FOR FIRST BUY ON CURVE USING 0.2 SOL
+    assert.strictEqual(userTokenAccountInfo.amount.toString(), "7105960264900");
+    assert.strictEqual(bonding_curve.realSolReserves.toNumber(), 200000000);
+    assert.strictEqual(
+      bonding_curve.virtualTokenReserves.toNumber(),
+      globalState.initialVirtualTokenReserves.toNumber() - 7105960264900
+    );
+    assert.strictEqual(feeReceiverBalance, 1000000);
   });
 });

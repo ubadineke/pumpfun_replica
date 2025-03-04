@@ -52,8 +52,7 @@ pub struct Buy<'info> {
     pub bonding_curve_sol_escrow: AccountInfo<'info>,
 
     #[account(
-        init_if_needed,
-        payer = user,
+        mut,
         associated_token::mint = mint,
         associated_token::authority = user,
     )]
@@ -87,20 +86,22 @@ impl Buy<'_> {
     pub fn handler(ctx: Context<Buy>, sol_amount: u64) -> Result<()> {
         //validate
         ctx.accounts.validate(sol_amount)?;
+        msg!("input sol amount: {}", sol_amount);
 
         let bonding_curve = &mut ctx.accounts.bonding_curve;
         //calculate tokens to be bought
         let mut token_amount = bonding_curve
             .get_tokens_for_buy_with_sol(sol_amount)
             .ok_or(ContractError::CalculationError)?;
+        msg!("this is the token amount: {}", token_amount);
 
         let mut last_buy = false;
         let mut calc_sol_amount = sol_amount;
-        let fee_lamports = 1_000_000_000;
+        let fee_lamports = 1_000_000;
 
         if token_amount >= bonding_curve.real_token_reserves {
             last_buy = true;
-            //set token to existing value in reserve and compute new sol_amount to be paid
+            //set token to existing valuvaluee in reserve and compute new sol_amount to be paid
             token_amount = bonding_curve.real_token_reserves;
             calc_sol_amount = bonding_curve
                 .recompute_sol_amount_for_last_buy()
