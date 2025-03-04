@@ -220,8 +220,8 @@ describe("pumpfun-replica", () => {
   });
 
   it("Token bought from bonding curve", async () => {
-    const initialTokenAccountInfo = await getAccount(provider.connection, userTokenAccount.address);
-    console.log("INITIAL USER TOKEN ACCOUNT INFO", initialTokenAccountInfo.amount.toString());
+    // const initialTokenAccountInfo = await getAccount(provider.connection, userTokenAccount.address);
+    // console.log("INITIAL USER TOKEN ACCOUNT INFO", initialTokenAccountInfo.amount.toString());
 
     const tx = await program.methods
       .buy(SOL_FOR_BUY)

@@ -11,7 +11,7 @@ use anchor_spl::{
 };
 
 #[derive(Accounts)]
-pub struct Buy<'info> {
+pub struct Sell<'info> {
     #[account(mut)]
     user: Signer<'info>,
 
@@ -65,9 +65,9 @@ pub struct Buy<'info> {
     associated_token_program: Program<'info, AssociatedToken>,
 }
 
-impl Buy<'_> {
+impl Sell<'_> {
     pub fn validate(&self, amount: u64) -> Result<()> {
-        require!(amount > 0, ContractError::MinBuy);
+        require!(amount > 0, ContractError::MinSell);
 
         require!(
             self.fee_receiver.key() == self.global.fee_receiver,
@@ -76,6 +76,12 @@ impl Buy<'_> {
 
         let rent = Rent::get()?;
         let min_rent = rent.minimum_balance(0); // 0 for data size since this is just a native SOL account
+
+        require!(
+            self.user_token_account.amount >= amount,
+            ContractError::InsufficientUserTokens,
+        );
+
         require!(
             self.user.get_lamports() >= amount.checked_add(min_rent).unwrap(),
             ContractError::InsufficientUserSOL,
@@ -83,32 +89,26 @@ impl Buy<'_> {
 
         Ok(())
     }
-    pub fn handler(ctx: Context<Buy>, sol_amount: u64) -> Result<()> {
+
+    pub fn handler(ctx: Context<Sell>, token_amount: u64) -> Result<()> {
         //validate
-        ctx.accounts.validate(sol_amount)?;
-        msg!("input sol amount: {}", sol_amount);
+        ctx.accounts.validate(token_amount)?;
 
         let bonding_curve = &mut ctx.accounts.bonding_curve;
-        //calculate tokens to be bought
-        let mut token_amount = bonding_curve
-            .get_tokens_for_buy_with_sol(sol_amount)
-            .ok_or(ContractError::CalculationError)?;
-        msg!("this is the token amount: {}", token_amount);
 
-        let mut last_buy = false;
-        let mut calc_sol_amount = sol_amount;
+        //calculate sol to be received for selling
+        let sol_amount = bonding_curve
+            .get_sol_for_sale_on_tokens(token_amount)
+            .ok_or(ContractError::CalculationError)?;
+
+        msg!("This is the sol amount {}", sol_amount);
+
         let fee_lamports = 1_000_000;
 
-        if token_amount >= bonding_curve.real_token_reserves {
-            last_buy = true;
-            //set token to existing valuvaluee in reserve and compute new sol_amount to be paid
-            token_amount = bonding_curve.real_token_reserves;
-            calc_sol_amount = bonding_curve
-                .recompute_sol_amount_for_last_buy()
-                .ok_or(ContractError::CalculationError)?;
-        }
-        //Collect Fee
-        // Transfer SOL to fee recipient
+        let sell_amount_minus_fee = sol_amount - fee_lamports;
+
+        //Collect fees
+        //Transfer SOL to fee recipient
         let fee_transfer_instruction = system_instruction::transfer(
             ctx.accounts.user.key,
             &ctx.accounts.fee_receiver.key(),
@@ -116,63 +116,55 @@ impl Buy<'_> {
         );
 
         anchor_lang::solana_program::program::invoke_signed(
-            &fee_transfer_instruction,
-            &[
-                ctx.accounts.user.to_account_info(),
-                ctx.accounts.fee_receiver.to_account_info(),
-                ctx.accounts.system_program.to_account_info(),
-            ],
-            &[],
-        )?;
+          &fee_transfer_instruction,
+          &[
+              ctx.accounts.user.to_account_info(),
+              ctx.accounts.fee_receiver.to_account_info(),
+              ctx.accounts.system_program.to_account_info(),
+          ],
+          &[],
+      )?;
 
-        //Deduct SOL
-        let transfer_instruction = system_instruction::transfer(
-            ctx.accounts.user.key,
-            ctx.accounts.bonding_curve_sol_escrow.to_account_info().key,
-            sol_amount,
-        );
-
-        anchor_lang::solana_program::program::invoke_signed(
-            &transfer_instruction,
-            &[
-                ctx.accounts.user.to_account_info(),
-                ctx.accounts.bonding_curve_sol_escrow.to_account_info(),
-                ctx.accounts.system_program.to_account_info(),
-            ],
-            &[],
-        )?;
-
-        //Send Token
-        // Transfer tokens to user
+        //Transfer TOKEN TO BONDING CURVE
         let cpi_accounts = Transfer {
-            from: ctx.accounts.bonding_curve_token_account.to_account_info(),
-            to: ctx.accounts.user_token_account.to_account_info(),
-            authority: bonding_curve.to_account_info(),
+            from: ctx.accounts.user_token_account.to_account_info(),
+            to: ctx.accounts.bonding_curve_token_account.to_account_info(),
+            authority: ctx.accounts.user.to_account_info(),
         };
-        let mint_key = ctx.accounts.mint.key();
-        let mint_auth_signer_seeds: &[&[&[u8]]] = &[&[
-            b"bonding-curve",
-            &mint_key.as_ref(),
-            &[ctx.bumps.bonding_curve],
-        ]];
-
         token::transfer(
-            CpiContext::new_with_signer(
-                ctx.accounts.token_program.to_account_info(),
-                cpi_accounts,
-                mint_auth_signer_seeds,
-            ),
+            CpiContext::new(ctx.accounts.token_program.to_account_info(), cpi_accounts),
             token_amount,
         )?;
 
-        //Update Reserves
-        if last_buy == true {
-            bonding_curve.complete = true;
-        }
+        //Transfer sol to user
+        let transfer_instruction = system_instruction::transfer(
+            &ctx.accounts.bonding_curve_sol_escrow.to_account_info().key,
+            &ctx.accounts.user.to_account_info().key,
+            sell_amount_minus_fee,
+        );
 
-        //Update Reserves
-        bonding_curve.update_reserves_after_buy(token_amount, calc_sol_amount);
+        //GENERATE SIGNER SEEDS
+        let sol_escrow_signer_seeds: &[&[&[u8]]] = &[&[
+            b"sol-escrow",
+            &[ctx.bumps.bonding_curve_sol_escrow],
+        ]];
 
+        invoke_signed(
+            &transfer_instruction,
+            &[
+                ctx.accounts
+                    .bonding_curve_sol_escrow
+                    .to_account_info()
+                    .clone(),
+                ctx.accounts.user.to_account_info().clone(),
+                ctx.accounts.system_program.to_account_info(),
+            ],
+            sol_escrow_signer_seeds,
+        )?;
+
+        //update reserves
+        bonding_curve.update_reserves_after_sell(token_amount, sol_amount);
         Ok(())
     }
 }
+

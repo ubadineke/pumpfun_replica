@@ -126,7 +126,7 @@ impl BondingCurve {
         recomputed_sol_amount
     }
 
-    pub fn update_reserves(&mut self, token_amount: u64, sol_amount: u64) -> Option<()> {
+    pub fn update_reserves_after_buy(&mut self, token_amount: u64, sol_amount: u64) -> Option<()> {
         // Adjusting token reserve values
         // New Virtual Token Reserves
         let new_virtual_token_reserves =
@@ -165,4 +165,48 @@ impl BondingCurve {
 
         Some(())
     }
+
+pub fn update_reserves_after_sell(&mut self, token_amount:u64, sol_amount: u64) -> Option<()>{
+
+    // Adjusting token reserve values
+    // New Virtual Token Reserves
+    let new_virtual_token_reserves =
+        (self.virtual_token_reserves as u128).checked_add(token_amount as u128)?;
+    msg!(
+        "apply_sell: new_virtual_token_reserves: {}",
+        new_virtual_token_reserves
+    );
+
+    // New Real Token Reserves
+    let new_real_token_reserves =
+        (self.real_token_reserves as u128).checked_add(token_amount as u128)?;
+    msg!(
+        "apply_sell: new_real_token_reserves: {}",
+        new_real_token_reserves
+    );
+
+    // Adjusting sol reserve values
+    // New Virtual Sol Reserves
+    let new_virtual_sol_reserves =
+        (self.virtual_sol_reserves as u128).checked_sub(sol_amount as u128)?;
+    msg!(
+        "apply_sell: new_virtual_sol_reserves: {}",
+        new_virtual_sol_reserves
+    );
+
+    // New Real Sol Reserves
+    let new_real_sol_reserves = self.real_sol_reserves.checked_sub(sol_amount)?;
+    msg!(
+        "apply_sell: new_real_sol_reserves: {}",
+        new_real_sol_reserves
+    );
+
+    self.virtual_token_reserves = new_virtual_token_reserves.try_into().ok()?;
+    self.real_token_reserves = new_real_token_reserves.try_into().ok()?;
+    self.virtual_sol_reserves = new_virtual_sol_reserves.try_into().ok()?;
+    self.real_sol_reserves = new_real_sol_reserves.try_into().ok()?;
+
+    Some(())
+    
+}
 }
