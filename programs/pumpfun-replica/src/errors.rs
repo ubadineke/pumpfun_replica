@@ -25,4 +25,10 @@ pub enum ContractError {
 
     #[msg("Error while performing calculation")]
     CalculationError,
+
+    #[msg("Invalid Mint Decimals")]
+    InvalidMintDecimals,
+
+    #[msg("Wrong Authority")]
+    WrongAuthority
 }

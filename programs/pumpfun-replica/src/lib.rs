@@ -16,6 +16,12 @@ pub mod pumpfun_replica {
         initialize::initialize(ctx, params)
     }
 
+    pub fn create_bonding_curve(
+        ctx: Context<CreateBondingCurve>,
+        params: CreateBondingCurveParams,
+    ) -> Result<()> {
+        CreateBondingCurve::handler(ctx, params)
+    }
     pub fn buy(ctx: Context<Buy>, sol_amount: u64) -> Result<()> {
         Buy::handler(ctx, sol_amount)
     }

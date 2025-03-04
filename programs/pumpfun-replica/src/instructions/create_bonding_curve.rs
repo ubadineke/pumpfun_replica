@@ -2,6 +2,8 @@ use crate::errors::*;
 use crate::states::{bonding_curve::*, global::*};
 use anchor_lang::prelude::*;
 
+use anchor_spl::metadata::Metadata;
+use anchor_spl::token_interface::spl_token_metadata_interface::state::TokenMetadata;
 use anchor_spl::{
     associated_token::AssociatedToken,
     metadata::{
@@ -13,11 +15,11 @@ use anchor_spl::{
 #[derive(Accounts)]
 pub struct CreateBondingCurve<'info> {
     #[account(
-        init,
-        payer = creator,
-        mint::decimals = global.mint_decimals,
-        mint::authority = bonding_curve,
-        mint::freeze_authority = bonding_curve
+        mut,
+        constraint = mint.decimals == global.mint_decimals @ ContractError::InvalidMintDecimals,
+        constraint = mint.mint_authority == Some(bonding_curve.key()).into() @ContractError::WrongAuthority,
+        // mint::authority = bonding_curve,
+        // mint::freeze_authority = bonding_curve
     )]
     mint: Box<Account<'info, Mint>>,
 
@@ -63,7 +65,7 @@ pub struct CreateBondingCurve<'info> {
     pub token_program: Program<'info, Token>,
     pub associated_token_program: Program<'info, AssociatedToken>,
     /// CHECK: token metadata program account
-    pub token_metadata_program: UncheckedAccount<'info>,
+    pub token_metadata_program: Program<'info, Metadata>,
     // research if this rent account is necessary
     /// CHECK: rent account
     pub rent: UncheckedAccount<'info>,

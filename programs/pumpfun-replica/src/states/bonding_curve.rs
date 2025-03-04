@@ -19,6 +19,7 @@ pub struct BondingCurve {
     pub bump: u8,
 }
 
+#[derive(AnchorSerialize, AnchorDeserialize, Debug, Clone)]
 pub struct CreateBondingCurveParams {
     pub name: String,
     pub symbol: String,
