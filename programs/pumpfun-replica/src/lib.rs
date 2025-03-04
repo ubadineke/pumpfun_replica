@@ -25,4 +25,9 @@ pub mod pumpfun_replica {
     pub fn buy(ctx: Context<Buy>, sol_amount: u64) -> Result<()> {
         Buy::handler(ctx, sol_amount)
     }
+
+    pub fn sell(ctx: Context<Sell>, token_amount: u64) -> Result<()> {
+        Sell::handler(ctx, token_amount)
+    }
+
 }
