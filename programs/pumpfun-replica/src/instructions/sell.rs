@@ -73,18 +73,10 @@ impl Sell<'_> {
             self.fee_receiver.key() == self.global.fee_receiver,
             ContractError::InvalidFeeReceiver
         );
-
-        let rent = Rent::get()?;
-        let min_rent = rent.minimum_balance(0); // 0 for data size since this is just a native SOL account
-
+        
         require!(
             self.user_token_account.amount >= amount,
             ContractError::InsufficientUserTokens,
-        );
-
-        require!(
-            self.user.get_lamports() >= amount.checked_add(min_rent).unwrap(),
-            ContractError::InsufficientUserSOL,
         );
 
         Ok(())
@@ -144,8 +136,10 @@ impl Sell<'_> {
         );
 
         //GENERATE SIGNER SEEDS
+        let mint_key = ctx.accounts.mint.key();
         let sol_escrow_signer_seeds: &[&[&[u8]]] = &[&[
             b"sol-escrow",
+            mint_key.as_ref(),
             &[ctx.bumps.bonding_curve_sol_escrow],
         ]];
 
